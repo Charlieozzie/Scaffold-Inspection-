@@ -1,0 +1,1835 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
+import {
+  ClipboardList,
+  FileText,
+  LogOut,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  Building2,
+  Pencil,
+  Search,
+  Clock3,
+  MapPin,
+  Download,
+} from "lucide-react";
+
+const STORAGE_KEY = "scaffoldInspectionMvpV3";
+
+const ROLE_OPTIONS = ["inspector", "manager", "client"];
+const SCAFFOLD_TYPES = [
+  { value: "tube_fitting", label: "Tube & Fitting" },
+  { value: "system", label: "System Scaffold" },
+  { value: "podium", label: "Low Level Platform / Podium" },
+  { value: "ladder_staircase", label: "Ladder / Staircase" },
+];
+
+const tubeChecklist = [
+  "Scaffold founded on suitable base",
+  "Base plates present",
+  "Sole boards adequate and in good condition",
+  "Standards plumb and secure",
+  "Ledgers level and secure",
+  "Transoms correctly fitted",
+  "Bracing adequate",
+  "Ties correctly installed",
+  "Platforms fully boarded",
+  "Boards in good condition",
+  "No excessive gaps in platforms",
+  "Guardrails fitted correctly",
+  "Midrails fitted",
+  "Toe boards fitted",
+  "Brickguards / mesh fitted where required",
+  "Access provided safely",
+  "Ladder secured and extends correctly",
+  "Stair access safe where applicable",
+  "Loading bays suitable and marked",
+  "Scaffold tag / inspection status displayed",
+  "No obvious damage / missing fittings",
+  "Housekeeping satisfactory",
+  "Overall safe for use",
+];
+
+const systemChecklist = [
+  "Manufacturer system components used correctly",
+  "Base jacks / base plates adequate",
+  "Standards vertical",
+  "Ledgers / horizontals secure",
+  "Diagonal bracing complete",
+  "Decking installed correctly",
+  "Deck units locked / secured",
+  "Guardrails complete",
+  "Toe boards complete",
+  "Ties / anchors adequate",
+  "Access bays safe",
+  "Ladder / stair units correctly installed",
+  "Trapdoors safe and operational",
+  "Loading bays safe and labelled",
+  "Edge protection complete",
+  "System components undamaged",
+  "No missing locking pins/clips",
+  "Manufacturer guidance followed",
+  "Scaffold tag present",
+  "Overall safe for use",
+];
+
+const podiumChecklist = [
+  "Unit assembled to manufacturer instructions",
+  "Wheels / castors in good condition",
+  "Brakes applied",
+  "Platform deck secure",
+  "Guardrails fitted",
+  "Gates / chains functional if applicable",
+  "Platform free of defects",
+  "Ground surface level and firm",
+  "Outriggers fitted where required",
+  "No overloading risk",
+  "Safe access onto platform",
+  "Overall safe for use",
+];
+
+const ladderChecklist = [
+  "Ladder / stair unit suitable for task",
+  "Correct angle / position",
+  "Secured top and bottom where required",
+  "Non-slip feet in good condition",
+  "Treads / rungs clean and undamaged",
+  "Handrails fitted where required",
+  "Landing area clear",
+  "Access / egress unobstructed",
+  "Extension above landing adequate where applicable",
+  "No visible defects",
+  "Used only for permitted access purpose",
+  "Overall safe for use",
+];
+
+const checklistByType = {
+  tube_fitting: tubeChecklist,
+  system: systemChecklist,
+  podium: podiumChecklist,
+  ladder_staircase: ladderChecklist,
+};
+
+function typeLabel(value) {
+  return SCAFFOLD_TYPES.find((x) => x.value === value)?.label || value;
+}
+
+function hasLocalStorage() {
+  try {
+    return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+  } catch {
+    return false;
+  }
+}
+
+function uid(prefix = "id") {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return `${prefix}_${crypto.randomUUID()}`;
+    }
+  } catch {
+    // fall through to deterministic fallback
+  }
+  const timePart = Date.now().toString(36);
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `${prefix}_${timePart}_${randomPart}`;
+}
+
+function buildChecklist(items, overrides = {}) {
+  return items.map((item, index) => ({
+    id: uid(`check_${index}`),
+    item,
+    response: overrides[index]?.response || "yes",
+    comment: overrides[index]?.comment || "",
+    severity: overrides[index]?.severity || "low",
+  }));
+}
+
+function defaultStore() {
+  const now = new Date().toISOString();
+  return {
+    users: [
+      { id: "u1", name: "Ian Inspector", email: "inspector@test.com", password: "demo123", role: "inspector", employeeId: "INSP-001", active: true },
+      { id: "u2", name: "Maya Manager", email: "manager@test.com", password: "demo123", role: "manager", employeeId: "MGR-001", active: true },
+      { id: "u3", name: "Clara Client", email: "client@test.com", password: "demo123", role: "client", employeeId: "CL-001", active: true },
+    ],
+    sites: [
+      { id: "site1", name: "London West Yard", clientName: "ABC Developments", area: "West London", address: "1 Yard Street, London", lat: 51.5079, lng: -0.1276, createdAt: now },
+      { id: "site2", name: "Dockside Project", clientName: "Harbour Build", area: "Canary Wharf", address: "22 Dock Road, London", lat: 51.5055, lng: -0.0235, createdAt: now },
+    ],
+    scaffolds: [
+      { id: "sc1", name: "Block A Front Elevation", scaffoldType: "tube_fitting", siteId: "site1", area: "Zone A", description: "Front access scaffold", status: "passed", lat: 51.5079, lng: -0.1276, createdBy: "u2", assignedInspectorId: "u1", attachedUserId: "INSP-001", createdAt: now, updatedAt: now },
+      { id: "sc2", name: "Dock Stair Tower", scaffoldType: "system", siteId: "site2", area: "Tower 3", description: "Access tower", status: "restricted_use", lat: 51.5055, lng: -0.0235, createdBy: "u2", assignedInspectorId: "u1", attachedUserId: "MGR-001", createdAt: now, updatedAt: now },
+    ],
+    inspections: [
+      {
+        id: "in1",
+        scaffoldId: "sc1",
+        inspectionType: "tube_fitting",
+        inspectorUserId: "u1",
+        attachedUserId: "INSP-001",
+        overallResult: "pass",
+        notes: "All in good condition",
+        defectsSummary: "",
+        correctiveActions: "",
+        weather: "Dry",
+        gpsLat: 51.5079,
+        gpsLng: -0.1276,
+        photos: [],
+        checklist: buildChecklist(tubeChecklist),
+        createdAt: now,
+        updatedAt: now,
+        deleted: false,
+      },
+      {
+        id: "in2",
+        scaffoldId: "sc2",
+        inspectionType: "system",
+        inspectorUserId: "u2",
+        attachedUserId: "MGR-001",
+        overallResult: "conditional",
+        notes: "Minor issues with signage",
+        defectsSummary: "Missing one sign",
+        correctiveActions: "Replace loading bay label",
+        weather: "Cloudy",
+        gpsLat: 51.5055,
+        gpsLng: -0.0235,
+        photos: [],
+        checklist: buildChecklist(systemChecklist, {
+          13: { response: "no", comment: "Label missing", severity: "medium" },
+        }),
+        createdAt: now,
+        updatedAt: now,
+        deleted: false,
+      },
+    ],
+    preferences: {
+      u1: { rememberAttachedUserId: true, lastAttachedUserId: "INSP-001" },
+      u2: { rememberAttachedUserId: true, lastAttachedUserId: "MGR-001" },
+    },
+    clientAccess: {
+      u3: ["site1", "site2"],
+    },
+  };
+}
+
+function readStore() {
+  if (!hasLocalStorage()) return defaultStore();
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        ...defaultStore(),
+        ...parsed,
+      };
+    }
+  } catch {
+    // ignore broken storage and reset to defaults
+  }
+  return defaultStore();
+}
+
+function saveStore(store) {
+  if (!hasLocalStorage()) return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // ignore storage write failures
+  }
+}
+
+function statusFromResult(result) {
+  if (result === "pass") return "passed";
+  if (result === "conditional") return "restricted_use";
+  return "failed";
+}
+
+function deriveResult(checklist) {
+  if (checklist.some((x) => x.response === "no" && x.severity === "critical")) return "fail";
+  if (checklist.some((x) => x.response === "no")) return "conditional";
+  return "pass";
+}
+
+function formatDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildInspectionReportHtml({ inspection, scaffold, site, inspector }) {
+  const checklistRows = (inspection.checklist || []).map((item) => `
+    <tr>
+      <td>${escapeHtml(item.item)}</td>
+      <td style="text-transform:capitalize;">${escapeHtml(item.response)}</td>
+      <td>${escapeHtml(item.severity || "-")}</td>
+      <td>${escapeHtml(item.comment || "")}</td>
+    </tr>
+  `).join("");
+
+  const photosHtml = (inspection.photos || []).length
+    ? inspection.photos.map((photo) => `
+      <div style="break-inside:avoid; border:1px solid #d1d5db; border-radius:12px; overflow:hidden;">
+        <img src="${photo.dataUrl}" alt="${escapeHtml(photo.name)}" style="width:100%; height:220px; object-fit:cover; display:block;" />
+        <div style="padding:8px 10px; font-size:12px; color:#475569;">${escapeHtml(photo.name)}</div>
+      </div>
+    `).join("")
+    : `<div style="color:#64748b; font-size:14px;">No photos attached.</div>`;
+
+  return `<!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Inspection Report - ${escapeHtml(scaffold?.name || "Scaffold")}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; padding: 24px; }
+          h1,h2,h3,p { margin: 0; }
+          .header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:20px; }
+          .brand { font-size: 28px; font-weight: 700; }
+          .muted { color:#64748b; }
+          .badge { display:inline-block; padding:6px 10px; border-radius:999px; background:#e2e8f0; font-size:12px; text-transform:capitalize; }
+          .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:14px; margin-bottom:20px; }
+          .card { border:1px solid #cbd5e1; border-radius:14px; padding:16px; break-inside:avoid; }
+          .label { font-size:12px; color:#64748b; margin-bottom:4px; }
+          .value { font-size:14px; font-weight:600; }
+          table { width:100%; border-collapse: collapse; margin-top:10px; }
+          th, td { border:1px solid #cbd5e1; padding:8px; text-align:left; vertical-align:top; font-size:12px; }
+          th { background:#f8fafc; }
+          .section-title { font-size:18px; font-weight:700; margin-bottom:10px; }
+          .photos { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; }
+          .footer { margin-top:20px; font-size:12px; color:#64748b; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="brand">Scaffold Inspection Report</div>
+            <div class="muted">Generated from Scaffold Inspection Pro</div>
+          </div>
+          <div class="badge">${escapeHtml(inspection.overallResult)}</div>
+        </div>
+        <div class="grid">
+          <div class="card"><div class="label">Scaffold</div><div class="value">${escapeHtml(scaffold?.name || "-")}</div></div>
+          <div class="card"><div class="label">Type</div><div class="value">${escapeHtml(typeLabel(inspection.inspectionType))}</div></div>
+          <div class="card"><div class="label">Site</div><div class="value">${escapeHtml(site?.name || "-")}</div></div>
+          <div class="card"><div class="label">Area</div><div class="value">${escapeHtml(scaffold?.area || "-")}</div></div>
+          <div class="card"><div class="label">Inspector</div><div class="value">${escapeHtml(inspector?.name || "-")}</div></div>
+          <div class="card"><div class="label">Inspection date</div><div class="value">${escapeHtml(formatDate(inspection.createdAt))}</div></div>
+          <div class="card"><div class="label">Attached user ID</div><div class="value">${escapeHtml(inspection.attachedUserId || "-")}</div></div>
+          <div class="card"><div class="label">GPS</div><div class="value">${escapeHtml(inspection.gpsLat != null && inspection.gpsLng != null ? `${inspection.gpsLat.toFixed(5)}, ${inspection.gpsLng.toFixed(5)}` : "-")}</div></div>
+        </div>
+        <div class="card" style="margin-bottom:20px;">
+          <div class="section-title">Notes & Actions</div>
+          <p><strong>Weather:</strong> ${escapeHtml(inspection.weather || "-")}</p>
+          <p style="margin-top:8px;"><strong>Defects summary:</strong> ${escapeHtml(inspection.defectsSummary || "None recorded")}</p>
+          <p style="margin-top:8px;"><strong>Corrective actions:</strong> ${escapeHtml(inspection.correctiveActions || "None recorded")}</p>
+          <p style="margin-top:8px;"><strong>Notes:</strong> ${escapeHtml(inspection.notes || "None recorded")}</p>
+        </div>
+        <div class="card" style="margin-bottom:20px;">
+          <div class="section-title">Checklist Results</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Response</th>
+                <th>Severity</th>
+                <th>Comment</th>
+              </tr>
+            </thead>
+            <tbody>${checklistRows}</tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="section-title">Photos</div>
+          <div class="photos">${photosHtml}</div>
+        </div>
+        <div class="footer">Report created ${escapeHtml(formatDate(new Date().toISOString()))}</div>
+      </body>
+    </html>`;
+}
+
+function runSelfTests() {
+  const checklistPass = [{ response: "yes", severity: "low" }];
+  const checklistConditional = [{ response: "no", severity: "medium" }];
+  const checklistFail = [{ response: "no", severity: "critical" }];
+  const deleteSmoke = [{ id: "a", deleted: false }, { id: "b", deleted: false }].map((row) =>
+    row.id === "a" ? { ...row, deleted: true } : row,
+  );
+
+  return [
+    { name: "deriveResult pass", passed: deriveResult(checklistPass) === "pass" },
+    { name: "deriveResult conditional", passed: deriveResult(checklistConditional) === "conditional" },
+    { name: "deriveResult fail", passed: deriveResult(checklistFail) === "fail" },
+    { name: "statusFromResult maps conditional", passed: statusFromResult("conditional") === "restricted_use" },
+    { name: "uid uniqueness smoke test", passed: new Set(Array.from({ length: 20 }, () => uid("t"))).size === 20 },
+    { name: "typeLabel tube_fitting", passed: typeLabel("tube_fitting") === "Tube & Fitting" },
+    { name: "formatDate invalid safe", passed: formatDate("not-a-date") === "-" },
+    { name: "delete inspection marks deleted", passed: deleteSmoke[0].deleted === true && deleteSmoke[1].deleted === false },
+    { name: "scaffold delete removes scaffold", passed: [{ id: "s1" }, { id: "s2" }].filter((row) => row.id !== "s1").length === 1 },
+    { name: "pending scaffold delete default", passed: null === null },
+    { name: "map bounds ordered", passed: (() => { const minLat = 1; const maxLat = 2; const minLng = 3; const maxLng = 4; return minLat < maxLat && minLng < maxLng; })() },
+    { name: "escapeHtml escapes brackets", passed: escapeHtml("<x>") === "&lt;x&gt;" },
+  ];
+}
+
+function AppShell({ children, user, onLogout, title, subtitle, right }) {
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <div className="border-b bg-white sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+          <div>
+            <div className="font-semibold text-xl">Scaffold Inspection Pro</div>
+            <div className="text-sm text-slate-500">{title}{subtitle ? ` • ${subtitle}` : ""}</div>
+          </div>
+          <div className="flex items-center gap-3">
+            {right}
+            <Badge className="capitalize">{user.role}</Badge>
+            <div className="text-sm hidden md:block">{user.name}</div>
+            <Button variant="outline" size="sm" onClick={onLogout}>
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
+            </Button>
+          </div>
+        </div>
+      </div>
+      <div className="max-w-7xl mx-auto p-4">{children}</div>
+    </div>
+  );
+}
+
+function LoginScreen({ onLogin, users }) {
+  const [email, setEmail] = useState("manager@test.com");
+  const [password, setPassword] = useState("demo123");
+  const [error, setError] = useState("");
+
+  const demoLogins = users.map((u) => `${u.role}: ${u.email} / demo123`).join(" • ");
+
+  const handleLogin = () => {
+    const found = users.find(
+      (u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password && u.active,
+    );
+    if (!found) {
+      setError("Invalid login");
+      return;
+    }
+    setError("");
+    onLogin(found);
+  };
+
+  return (
+    <div className="min-h-screen grid place-items-center bg-gradient-to-br from-slate-100 to-slate-200 p-4">
+      <Card className="w-full max-w-md shadow-xl rounded-2xl">
+        <CardHeader>
+          <CardTitle className="text-2xl">Scaffold Inspection Pro</CardTitle>
+          <div className="text-sm text-slate-500">Workable MVP with roles, checklists, photos, GPS, and a map-style overview</div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Email</Label>
+            <Input value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>Password</Label>
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </div>
+          {error ? <div className="text-sm text-red-600">{error}</div> : null}
+          <Button className="w-full" onClick={handleLogin}>Sign In</Button>
+          <div className="text-xs text-slate-500 leading-5">Demo accounts: {demoLogins}</div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function MetricCard({ title, value, icon: Icon, tone = "default" }) {
+  const toneClass = tone === "danger" ? "border-red-200" : tone === "success" ? "border-green-200" : "border-slate-200";
+  return (
+    <Card className={`rounded-2xl ${toneClass}`}>
+      <CardContent className="p-5 flex items-center justify-between">
+        <div>
+          <div className="text-sm text-slate-500">{title}</div>
+          <div className="text-2xl font-semibold mt-1">{value}</div>
+        </div>
+        <div className="p-3 rounded-2xl bg-slate-100"><Icon className="w-5 h-5" /></div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ChecklistEditor({ items, setItems }) {
+  return (
+    <div className="space-y-3">
+      {items.map((row, idx) => (
+        <Card key={row.id || `${row.item}-${idx}`} className="rounded-2xl">
+          <CardContent className="p-4 space-y-3">
+            <div className="font-medium">{row.item}</div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                ["yes", "Yes"],
+                ["no", "No"],
+                ["na", "N/A"],
+              ].map(([value, label]) => (
+                <Button
+                  key={value}
+                  type="button"
+                  variant={row.response === value ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    const next = [...items];
+                    next[idx] = { ...next[idx], response: value };
+                    setItems(next);
+                  }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+            {row.response === "no" ? (
+              <div className="grid md:grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Severity</Label>
+                  <Select
+                    value={row.severity || "medium"}
+                    onValueChange={(value) => {
+                      const next = [...items];
+                      next[idx] = { ...next[idx], severity: value };
+                      setItems(next);
+                    }}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="critical">Critical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Comment</Label>
+                  <Input
+                    value={row.comment || ""}
+                    onChange={(e) => {
+                      const next = [...items];
+                      next[idx] = { ...next[idx], comment: e.target.value };
+                      setItems(next);
+                    }}
+                    placeholder="What is wrong?"
+                  />
+                </div>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function PhotosUploader({ photos, setPhotos }) {
+  const onFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    const converted = await Promise.all(
+      files.map(
+        (file) =>
+          new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve({ id: uid("photo"), name: file.name, dataUrl: reader.result });
+            reader.readAsDataURL(file);
+          }),
+      ),
+    );
+    setPhotos([...(photos || []), ...converted]);
+  };
+
+  return (
+    <div className="space-y-3">
+      <Input type="file" multiple accept="image/*" onChange={onFiles} />
+      <div className="grid md:grid-cols-3 gap-3">
+        {(photos || []).map((photo) => (
+          <div key={photo.id} className="border rounded-2xl overflow-hidden bg-white">
+            <img src={photo.dataUrl} alt={photo.name} className="w-full h-40 object-cover" />
+            <div className="p-2 text-xs truncate">{photo.name}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InspectionForm({ store, currentUser, scaffold, onSave, onCancel, initialInspection = null }) {
+  const preference = store.preferences[currentUser.id] || {
+    rememberAttachedUserId: true,
+    lastAttachedUserId: currentUser.employeeId || "",
+  };
+
+  const [attachedUserId, setAttachedUserId] = useState(
+    initialInspection?.attachedUserId || preference.lastAttachedUserId || currentUser.employeeId || "",
+  );
+  const [rememberAttachedUserId, setRememberAttachedUserId] = useState(preference.rememberAttachedUserId ?? true);
+  const [notes, setNotes] = useState(initialInspection?.notes || "");
+  const [weather, setWeather] = useState(initialInspection?.weather || "");
+  const [defectsSummary, setDefectsSummary] = useState(initialInspection?.defectsSummary || "");
+  const [correctiveActions, setCorrectiveActions] = useState(initialInspection?.correctiveActions || "");
+  const [gps, setGps] = useState({
+    lat: initialInspection?.gpsLat ?? scaffold?.lat ?? null,
+    lng: initialInspection?.gpsLng ?? scaffold?.lng ?? null,
+    loading: false,
+  });
+  const [photos, setPhotos] = useState(initialInspection?.photos || []);
+  const [checklist, setChecklist] = useState(
+    initialInspection?.checklist || buildChecklist(checklistByType[scaffold.scaffoldType] || []),
+  );
+
+  const result = useMemo(() => deriveResult(checklist), [checklist]);
+
+  const captureLocation = () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      alert("Location services not available on this device/browser.");
+      return;
+    }
+
+    setGps((g) => ({ ...g, loading: true }));
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGps({ lat: pos.coords.latitude, lng: pos.coords.longitude, loading: false });
+      },
+      (err) => {
+        console.warn("GPS error:", err);
+        alert("Location permission denied or unavailable. You can still continue without GPS.");
+        setGps((g) => ({ ...g, loading: false }));
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="rounded-2xl">
+        <CardHeader><CardTitle>{initialInspection?.id ? "Edit Inspection" : "New Inspection"}</CardTitle></CardHeader>
+        <CardContent className="grid md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Scaffold</Label>
+            <Input value={scaffold?.name || ""} disabled />
+          </div>
+          <div className="space-y-2">
+            <Label>Type</Label>
+            <Input value={typeLabel(scaffold?.scaffoldType)} disabled />
+          </div>
+          <div className="space-y-2">
+            <Label>Attached user ID</Label>
+            <Select value={attachedUserId || "unselected"} onValueChange={(value) => setAttachedUserId(value === "unselected" ? "" : value)}>
+              <SelectTrigger><SelectValue placeholder="Select user ID" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unselected">None</SelectItem>
+                {store.users
+                  .filter((u) => u.active && ["inspector", "manager"].includes(u.role))
+                  .map((u) => (
+                    <SelectItem key={u.id} value={u.employeeId || u.id}>
+                      {u.name} ({u.employeeId || u.id})
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2 pt-8">
+            <Checkbox checked={rememberAttachedUserId} onCheckedChange={(v) => setRememberAttachedUserId(Boolean(v))} />
+            <Label>Remember attached user ID</Label>
+          </div>
+          <div className="space-y-2">
+            <Label>Weather</Label>
+            <Input value={weather} onChange={(e) => setWeather(e.target.value)} placeholder="Dry / Wet / Windy" />
+          </div>
+          <div className="space-y-2">
+            <Label>GPS</Label>
+            <div className="flex gap-2">
+              <Input value={gps.lat != null && gps.lng != null ? `${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}` : "No location captured yet"} disabled />
+              <Button type="button" variant="outline" onClick={captureLocation} disabled={gps.loading}>
+                {gps.loading ? "Capturing..." : "Capture"}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl">
+        <CardHeader><CardTitle>Checklist</CardTitle></CardHeader>
+        <CardContent>
+          <ChecklistEditor items={checklist} setItems={setChecklist} />
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl">
+        <CardHeader><CardTitle>Photos</CardTitle></CardHeader>
+        <CardContent>
+          <PhotosUploader photos={photos} setPhotos={setPhotos} />
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl">
+        <CardHeader><CardTitle>Summary</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Defects summary</Label>
+              <Textarea value={defectsSummary} onChange={(e) => setDefectsSummary(e.target.value)} rows={4} />
+            </div>
+            <div className="space-y-2">
+              <Label>Corrective actions</Label>
+              <Textarea value={correctiveActions} onChange={(e) => setCorrectiveActions(e.target.value)} rows={4} />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Notes</Label>
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} />
+          </div>
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="text-sm">Overall result: <Badge className="capitalize">{result}</Badge></div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={onCancel}>Cancel</Button>
+              <Button
+                onClick={() =>
+                  onSave({
+                    ...initialInspection,
+                    scaffoldId: scaffold.id,
+                    inspectionType: scaffold.scaffoldType,
+                    inspectorUserId: currentUser.id,
+                    attachedUserId,
+                    overallResult: result,
+                    notes,
+                    defectsSummary,
+                    correctiveActions,
+                    weather,
+                    gpsLat: gps.lat,
+                    gpsLng: gps.lng,
+                    photos,
+                    checklist,
+                    rememberAttachedUserId,
+                  })
+                }
+              >
+                Save Inspection
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function SiteDialog({ onSave }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    clientName: "",
+    area: "",
+    address: "",
+    lat: "51.5074",
+    lng: "-0.1278",
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline"><Building2 className="w-4 h-4 mr-2" />Add Site</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Create Site</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          {[
+            ["name", "Site name"],
+            ["clientName", "Client name"],
+            ["area", "Area"],
+            ["address", "Address"],
+            ["lat", "Latitude"],
+            ["lng", "Longitude"],
+          ].map(([key, label]) => (
+            <div key={key} className="space-y-2">
+              <Label>{label}</Label>
+              <Input value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+            </div>
+          ))}
+          <Button
+            className="w-full"
+            onClick={() => {
+              onSave({
+                id: uid("site"),
+                ...form,
+                lat: Number(form.lat),
+                lng: Number(form.lng),
+                createdAt: new Date().toISOString(),
+              });
+              setOpen(false);
+              setForm({ name: "", clientName: "", area: "", address: "", lat: "51.5074", lng: "-0.1278" });
+            }}
+          >
+            Save Site
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ScaffoldDialog({ sites, onSave, currentUser }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    scaffoldType: "tube_fitting",
+    siteId: sites[0]?.id || "",
+    area: "",
+    description: "",
+    lat: "",
+    lng: "",
+  });
+
+  useEffect(() => {
+    if (!form.siteId && sites[0]?.id) {
+      setForm((f) => ({ ...f, siteId: sites[0].id }));
+    }
+  }, [form.siteId, sites]);
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button><Plus className="w-4 h-4 mr-2" />Add Scaffold</Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-xl">
+        <DialogHeader><DialogTitle>Create Scaffold</DialogTitle></DialogHeader>
+        <div className="grid md:grid-cols-2 gap-3">
+          <div className="space-y-2 md:col-span-2">
+            <Label>Scaffold name</Label>
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </div>
+          <div className="space-y-2">
+            <Label>Type</Label>
+            <Select value={form.scaffoldType} onValueChange={(v) => setForm({ ...form, scaffoldType: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {SCAFFOLD_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Site</Label>
+            <Select value={form.siteId} onValueChange={(v) => setForm({ ...form, siteId: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2"><Label>Area</Label><Input value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })} /></div>
+          <div className="space-y-2"><Label>Description</Label><Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
+          <div className="space-y-2"><Label>Latitude</Label><Input value={form.lat} onChange={(e) => setForm({ ...form, lat: e.target.value })} placeholder="Optional" /></div>
+          <div className="space-y-2"><Label>Longitude</Label><Input value={form.lng} onChange={(e) => setForm({ ...form, lng: e.target.value })} placeholder="Optional" /></div>
+        </div>
+        <Button
+          className="w-full mt-4"
+          onClick={() => {
+            const site = sites.find((s) => s.id === form.siteId);
+            onSave({
+              id: uid("scaf"),
+              name: form.name,
+              scaffoldType: form.scaffoldType,
+              siteId: form.siteId,
+              area: form.area,
+              description: form.description,
+              status: "erected",
+              lat: form.lat ? Number(form.lat) : site?.lat ?? null,
+              lng: form.lng ? Number(form.lng) : site?.lng ?? null,
+              createdBy: currentUser.id,
+              assignedInspectorId: currentUser.id,
+              attachedUserId: currentUser.employeeId || "",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            });
+            setOpen(false);
+            setForm({ name: "", scaffoldType: "tube_fitting", siteId: sites[0]?.id || "", area: "", description: "", lat: "", lng: "" });
+          }}
+        >
+          Save Scaffold
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function InspectionList({ inspections, scaffolds, users, onOpen, canDelete, onDelete, onEdit }) {
+  return (
+    <div className="space-y-3">
+      {inspections.length === 0 ? (
+        <Card className="rounded-2xl"><CardContent className="p-6 text-slate-500">No inspections found.</CardContent></Card>
+      ) : null}
+      {inspections.map((inspection) => {
+        const scaffold = scaffolds.find((s) => s.id === inspection.scaffoldId);
+        const user = users.find((u) => u.id === inspection.inspectorUserId);
+        return (
+          <Card key={inspection.id} className="rounded-2xl">
+            <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="font-semibold">{scaffold?.name || "Unknown scaffold"}</div>
+                <div className="text-sm text-slate-500">{typeLabel(inspection.inspectionType)} • {user?.name} • {formatDate(inspection.createdAt)}</div>
+                <div className="flex gap-2 flex-wrap">
+                  <Badge className="capitalize">{inspection.overallResult}</Badge>
+                  <Badge variant="outline">{scaffold?.area || "No area"}</Badge>
+                  {inspection.photos?.length ? <Badge variant="outline">{inspection.photos.length} photos</Badge> : null}
+                </div>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Button variant="outline" onClick={() => onOpen(inspection)}>Open</Button>
+                {onEdit ? <Button variant="outline" onClick={() => onEdit(inspection)}><Pencil className="w-4 h-4 mr-2" />Edit</Button> : null}
+                {canDelete ? <Button variant="destructive" onClick={() => onDelete(inspection)}><Trash2 className="w-4 h-4 mr-2" />Delete</Button> : null}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+function InspectionDetail({ inspection, scaffold, site, inspector, canEdit, onEdit, canDelete, onDelete, onExportPdf }) {
+  return (
+    <div className="space-y-4">
+      <Card className="rounded-2xl">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Inspection Detail</CardTitle>
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" onClick={() => onExportPdf(inspection)}>
+              <Download className="w-4 h-4 mr-2" />Export PDF
+            </Button>
+            {canEdit ? <Button variant="outline" onClick={onEdit}><Pencil className="w-4 h-4 mr-2" />Edit</Button> : null}
+            {canDelete ? <Button variant="destructive" onClick={() => onDelete(inspection)}><Trash2 className="w-4 h-4 mr-2" />Delete</Button> : null}
+          </div>
+        </CardHeader>
+        <CardContent className="grid md:grid-cols-2 gap-4 text-sm">
+          <div><strong>Scaffold:</strong> {scaffold?.name || "-"}</div>
+          <div><strong>Type:</strong> {typeLabel(inspection.inspectionType)}</div>
+          <div><strong>Site:</strong> {site?.name || "-"}</div>
+          <div><strong>Area:</strong> {scaffold?.area || "-"}</div>
+          <div><strong>Inspector:</strong> {inspector?.name || "-"}</div>
+          <div><strong>Attached user ID:</strong> {inspection.attachedUserId || "-"}</div>
+          <div><strong>Result:</strong> <Badge className="capitalize ml-2">{inspection.overallResult}</Badge></div>
+          <div><strong>Date:</strong> {formatDate(inspection.createdAt)}</div>
+          <div><strong>Weather:</strong> {inspection.weather || "-"}</div>
+          <div><strong>GPS:</strong> {inspection.gpsLat != null && inspection.gpsLng != null ? `${inspection.gpsLat.toFixed(5)}, ${inspection.gpsLng.toFixed(5)}` : "-"}</div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl">
+        <CardHeader><CardTitle>Notes</CardTitle></CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div><strong>Defects:</strong> {inspection.defectsSummary || "None recorded"}</div>
+          <div><strong>Corrective actions:</strong> {inspection.correctiveActions || "None recorded"}</div>
+          <div><strong>Notes:</strong> {inspection.notes || "None recorded"}</div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl">
+        <CardHeader><CardTitle>Checklist Responses</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          {inspection.checklist.map((item, idx) => (
+            <div key={item.id || idx} className="flex items-start justify-between gap-3 border-b py-2 text-sm">
+              <div>{item.item}</div>
+              <div className="flex gap-2 items-center">
+                <Badge variant={item.response === "no" ? "destructive" : "outline"} className="capitalize">{item.response}</Badge>
+                {item.comment ? <span className="text-slate-500 max-w-xs text-right">{item.comment}</span> : null}
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      {inspection.photos?.length ? (
+        <Card className="rounded-2xl">
+          <CardHeader><CardTitle>Photos</CardTitle></CardHeader>
+          <CardContent className="grid md:grid-cols-3 gap-3">
+            {inspection.photos.map((photo) => (
+              <img key={photo.id} src={photo.dataUrl} alt={photo.name} className="rounded-xl w-full h-48 object-cover" />
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+    </div>
+  );
+}
+
+function MapView({ scaffolds, sites, inspections, users, currentUser, onMovePin }) {
+  const [editingPinId, setEditingPinId] = useState(null);
+  const [draftCoords, setDraftCoords] = useState({ lat: "", lng: "" });
+
+  const latestByScaffold = useMemo(() => {
+    const map = {};
+    inspections
+      .filter((i) => !i.deleted)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .forEach((inspection) => {
+        if (!map[inspection.scaffoldId]) map[inspection.scaffoldId] = inspection;
+      });
+    return map;
+  }, [inspections]);
+
+  const withCoords = scaffolds.filter((s) => s.lat != null && s.lng != null);
+  const canMovePins = currentUser && ["manager", "inspector"].includes(currentUser.role);
+
+  const bounds = useMemo(() => {
+    if (withCoords.length === 0) {
+      return { minLat: 51.4, maxLat: 51.6, minLng: -0.25, maxLng: 0.05 };
+    }
+    const lats = withCoords.map((s) => Number(s.lat));
+    const lngs = withCoords.map((s) => Number(s.lng));
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    const latPad = Math.max((maxLat - minLat) * 0.25, 0.01);
+    const lngPad = Math.max((maxLng - minLng) * 0.25, 0.01);
+    return {
+      minLat: minLat - latPad,
+      maxLat: maxLat + latPad,
+      minLng: minLng - lngPad,
+      maxLng: maxLng + lngPad,
+    };
+  }, [withCoords]);
+
+  const latRange = Math.max(bounds.maxLat - bounds.minLat, 0.00001);
+  const lngRange = Math.max(bounds.maxLng - bounds.minLng, 0.00001);
+
+  const pointToPercent = (lat, lng) => {
+    const x = ((Number(lng) - bounds.minLng) / lngRange) * 100;
+    const y = ((bounds.maxLat - Number(lat)) / latRange) * 100;
+    return {
+      left: `${Math.min(100, Math.max(0, x)).toFixed(2)}%`,
+      top: `${Math.min(100, Math.max(0, y)).toFixed(2)}%`,
+    };
+  };
+
+  const percentToCoords = (xPercent, yPercent) => {
+    const lng = bounds.minLng + (xPercent / 100) * lngRange;
+    const lat = bounds.maxLat - (yPercent / 100) * latRange;
+    return { lat, lng };
+  };
+
+  const startEditPin = (scaffold) => {
+    setEditingPinId(scaffold.id);
+    setDraftCoords({
+      lat: scaffold.lat != null ? String(scaffold.lat) : "",
+      lng: scaffold.lng != null ? String(scaffold.lng) : "",
+    });
+  };
+
+  const cancelEditPin = () => {
+    setEditingPinId(null);
+    setDraftCoords({ lat: "", lng: "" });
+  };
+
+  const savePinPosition = (scaffoldId) => {
+    const nextLat = Number(draftCoords.lat);
+    const nextLng = Number(draftCoords.lng);
+    if (Number.isNaN(nextLat) || Number.isNaN(nextLng)) return;
+    onMovePin(scaffoldId, nextLat, nextLng);
+    cancelEditPin();
+  };
+
+  const nudgeDraftCoords = (axis, delta) => {
+    setDraftCoords((prev) => {
+      const current = Number(prev[axis] || 0);
+      const nextValue = Number.isNaN(current) ? delta : current + delta;
+      return {
+        ...prev,
+        [axis]: nextValue.toFixed(5),
+      };
+    });
+  };
+
+  const handleMapClick = (event, scaffoldId) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    const coords = percentToCoords(x, y);
+    setDraftCoords({ lat: coords.lat.toFixed(5), lng: coords.lng.toFixed(5) });
+    if (editingPinId !== scaffoldId) setEditingPinId(scaffoldId);
+  };
+
+  const editingScaffold = editingPinId ? scaffolds.find((s) => s.id === editingPinId) : null;
+  const latTicks = Array.from({ length: 5 }, (_, index) => (bounds.maxLat - (latRange * index) / 4).toFixed(4));
+  const lngTicks = Array.from({ length: 5 }, (_, index) => (bounds.minLng + (lngRange * index) / 4).toFixed(4));
+
+  return (
+    <div className="space-y-4">
+      <Card className="rounded-2xl">
+        <CardHeader>
+          <CardTitle>Map Overview</CardTitle>
+          <div className="text-sm text-slate-500">
+            The canvas browser is blocking real map tiles, so this view now shows a high-contrast scaffold location plot with clearly visible pins and coordinate axes.
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid lg:grid-cols-[1fr_320px] gap-4 items-start">
+            <div className="rounded-2xl border-2 border-slate-300 bg-white min-h-[460px] relative overflow-hidden shadow-sm">
+              <div className="absolute inset-0 bg-white" />
+              <div
+                className="absolute inset-0"
+                style={{
+                  backgroundImage: "linear-gradient(to right, rgba(148,163,184,0.22) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.22) 1px, transparent 1px)",
+                  backgroundSize: "56px 56px",
+                }}
+              />
+              <div className="absolute left-0 top-0 bottom-10 w-20 border-r-2 border-slate-300 bg-slate-50 flex flex-col justify-between py-3 text-[11px] font-medium text-slate-700">
+                {latTicks.map((tick) => (
+                  <div key={tick} className="px-2">{tick}</div>
+                ))}
+              </div>
+              <div className="absolute left-20 right-0 bottom-0 h-10 border-t-2 border-slate-300 bg-slate-50 flex items-center justify-between px-4 text-[11px] font-medium text-slate-700">
+                {lngTicks.map((tick) => (
+                  <div key={tick}>{tick}</div>
+                ))}
+              </div>
+              <div className="absolute left-24 top-3 flex gap-2 items-center bg-white border rounded-full px-3 py-1 shadow-sm text-xs">
+                <span className="inline-block w-3 h-3 rounded-full bg-red-500" /> Scaffold pin
+              </div>
+              <div className="absolute right-4 top-3 text-xs bg-slate-900 text-white rounded-full px-3 py-1">North ↑</div>
+              <div className="absolute left-20 right-0 top-0 bottom-10">
+                {withCoords.length === 0 ? (
+                  <div className="absolute inset-0 grid place-items-center text-base text-slate-500 font-medium">
+                    No scaffold coordinates available yet.
+                  </div>
+                ) : (
+                  withCoords.map((s, index) => {
+                    const isEditing = editingPinId === s.id;
+                    const liveLat = isEditing && draftCoords.lat !== "" ? Number(draftCoords.lat) : Number(s.lat);
+                    const liveLng = isEditing && draftCoords.lng !== "" ? Number(draftCoords.lng) : Number(s.lng);
+                    const point = pointToPercent(liveLat, liveLng);
+                    return (
+                      <div
+                        key={s.id}
+                        className="absolute -translate-x-1/2 -translate-y-1/2"
+                        style={{ left: point.left, top: point.top }}
+                      >
+                        <button
+                          type="button"
+                          className="flex flex-col items-center pointer-events-auto"
+                          onClick={() => canMovePins && startEditPin(s)}
+                        >
+                          <div className={`w-5 h-5 rounded-full border-4 shadow-lg ${isEditing ? "bg-blue-600 border-blue-200" : "bg-red-600 border-red-200"}`} />
+                          <div className="mt-1 text-[11px] font-semibold bg-white border px-2 py-1 rounded-lg shadow max-w-[170px] truncate">
+                            {index + 1}. {s.name}
+                          </div>
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <Card className="rounded-2xl">
+              <CardHeader><CardTitle className="text-base">Visible pins</CardTitle></CardHeader>
+              <CardContent className="space-y-3">
+                {withCoords.length === 0 ? (
+                  <div className="text-sm text-slate-500">No scaffold pins to show yet.</div>
+                ) : (
+                  withCoords.map((s, index) => {
+                    const site = sites.find((x) => x.id === s.siteId);
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        className={`w-full text-left border rounded-xl p-3 bg-white hover:bg-slate-50 ${editingPinId === s.id ? "ring-2 ring-blue-500" : ""}`}
+                        onClick={() => canMovePins && startEditPin(s)}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="font-medium">{index + 1}. {s.name}</div>
+                          <div className="w-3 h-3 rounded-full bg-red-500 shrink-0 mt-1" />
+                        </div>
+                        <div className="text-xs text-slate-500 mt-1">{site?.name || "Unknown site"} • {typeLabel(s.scaffoldType)}</div>
+                        <div className="text-xs text-slate-600 mt-1">{Number(s.lat).toFixed(5)}, {Number(s.lng).toFixed(5)}</div>
+                      </button>
+                    );
+                  })
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {canMovePins && editingScaffold ? (
+            <Card className="rounded-2xl border-dashed">
+              <CardContent className="p-4 space-y-4">
+                <div className="font-medium">Move pin: {editingScaffold.name}</div>
+                <button
+                  type="button"
+                  className="relative w-full h-64 rounded-2xl border-2 border-slate-300 overflow-hidden bg-white text-left"
+                  onClick={(event) => handleMapClick(event, editingScaffold.id)}
+                >
+                  <div
+                    className="absolute inset-0"
+                    style={{
+                      backgroundImage: "linear-gradient(to right, rgba(148,163,184,0.22) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.22) 1px, transparent 1px)",
+                      backgroundSize: "44px 44px",
+                    }}
+                  />
+                  <div className="absolute left-3 top-3 text-xs bg-slate-900 text-white rounded-full px-3 py-1">Click anywhere to place the pin</div>
+                  <div
+                    className="absolute -translate-x-1/2 -translate-y-1/2"
+                    style={{
+                      ...pointToPercent(
+                        draftCoords.lat !== "" ? Number(draftCoords.lat) : Number(editingScaffold.lat),
+                        draftCoords.lng !== "" ? Number(draftCoords.lng) : Number(editingScaffold.lng),
+                      ),
+                    }}
+                  >
+                    <div className="w-6 h-6 rounded-full bg-blue-600 border-4 border-blue-200 shadow-lg" />
+                  </div>
+                </button>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Latitude</Label>
+                    <Input value={draftCoords.lat} onChange={(e) => setDraftCoords((prev) => ({ ...prev, lat: e.target.value }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Longitude</Label>
+                    <Input value={draftCoords.lng} onChange={(e) => setDraftCoords((prev) => ({ ...prev, lng: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => nudgeDraftCoords("lat", 0.0001)}>North</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => nudgeDraftCoords("lat", -0.0001)}>South</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => nudgeDraftCoords("lng", -0.0001)}>West</Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => nudgeDraftCoords("lng", 0.0001)}>East</Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => savePinPosition(editingScaffold.id)}>Save position</Button>
+                  <Button variant="outline" onClick={cancelEditPin}>Cancel</Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {withCoords.map((s) => {
+              const site = sites.find((x) => x.id === s.siteId);
+              const latest = latestByScaffold[s.id];
+              const inspector = users.find((u) => u.id === latest?.inspectorUserId);
+              const photo = latest?.photos?.[0]?.dataUrl;
+              return (
+                <Card key={s.id} className="rounded-2xl bg-white">
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="font-semibold">{s.name}</div>
+                        <div className="text-xs text-slate-500">{site?.name || "Unknown site"} • {s.area || "No area"}</div>
+                      </div>
+                      <Badge className="capitalize">{String(s.status || "-").replaceAll("_", " ")}</Badge>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      <Badge variant="outline">{typeLabel(s.scaffoldType)}</Badge>
+                      <Badge variant="outline">{Number(s.lat).toFixed(5)}, {Number(s.lng).toFixed(5)}</Badge>
+                    </div>
+                    <div className="text-sm text-slate-600">Inspector: {inspector?.name || "-"}</div>
+                    <div className="text-sm text-slate-600">Last inspection: {latest ? formatDate(latest.createdAt) : "None"}</div>
+                    {canMovePins ? (
+                      <Button variant="outline" size="sm" onClick={() => startEditPin(s)}>
+                        <Pencil className="w-4 h-4 mr-2" />Move pin
+                      </Button>
+                    ) : null}
+                    {photo ? <img src={photo.dataUrl || photo} alt={s.name} className="rounded-xl w-full h-32 object-cover" /> : null}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function ConfirmDeleteDialog({ open, title, description, onConfirm, onCancel }) {
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onCancel(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">{description}</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onCancel}>Cancel</Button>
+            <Button variant="destructive" onClick={onConfirm}>Delete</Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ManagerUserPanel({ users, setStore }) {
+  const [form, setForm] = useState({ name: "", email: "", password: "demo123", role: "inspector", employeeId: "" });
+  return (
+    <Card className="rounded-2xl">
+      <CardHeader><CardTitle>User Management</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid md:grid-cols-5 gap-3">
+          <Input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <Input placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <Input placeholder="Employee ID" value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} />
+          <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>{ROLE_OPTIONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+          </Select>
+          <Button
+            onClick={() => {
+              if (!form.name || !form.email) return;
+              setStore((prev) => ({
+                ...prev,
+                users: [...prev.users, { id: uid("u"), ...form, active: true }],
+              }));
+              setForm({ name: "", email: "", password: "demo123", role: "inspector", employeeId: "" });
+            }}
+          >
+            Add User
+          </Button>
+        </div>
+        <div className="space-y-2">
+          {users.map((u) => (
+            <div key={u.id} className="flex items-center justify-between border rounded-xl p-3 bg-white">
+              <div>
+                <div className="font-medium">{u.name}</div>
+                <div className="text-sm text-slate-500">{u.email} • {u.role} • {u.employeeId || "No ID"}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge className="capitalize">{u.role}</Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SelfTestPanel() {
+  const tests = useMemo(() => runSelfTests(), []);
+  return (
+    <Card className="rounded-2xl border-dashed">
+      <CardHeader><CardTitle>Runtime Self-Checks</CardTitle></CardHeader>
+      <CardContent className="space-y-2">
+        {tests.map((test) => (
+          <div key={test.name} className="flex items-center justify-between text-sm">
+            <span>{test.name}</span>
+            <Badge variant={test.passed ? "outline" : "destructive"}>{test.passed ? "pass" : "fail"}</Badge>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function ScaffoldInspectionAppMvp() {
+  const [store, setStore] = useState(() => readStore());
+  const [currentUser, setCurrentUser] = useState(null);
+  const [tab, setTab] = useState("dashboard");
+  const [search, setSearch] = useState("");
+  const [selectedInspection, setSelectedInspection] = useState(null);
+  const [editingInspection, setEditingInspection] = useState(null);
+  const [selectedScaffoldForNew, setSelectedScaffoldForNew] = useState("");
+  const [pendingScaffoldDelete, setPendingScaffoldDelete] = useState(null);
+  const [pendingSiteDelete, setPendingSiteDelete] = useState(null);
+
+  useEffect(() => {
+    saveStore(store);
+  }, [store]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      setTab("dashboard");
+      setSelectedInspection(null);
+      setEditingInspection(null);
+    }
+  }, [currentUser]);
+
+  const visibleSiteIds = useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUser.role === "client") return store.clientAccess[currentUser.id] || [];
+    return store.sites.map((s) => s.id);
+  }, [currentUser, store.clientAccess, store.sites]);
+
+  const visibleScaffolds = useMemo(
+    () => store.scaffolds.filter((s) => visibleSiteIds.includes(s.siteId)),
+    [store.scaffolds, visibleSiteIds],
+  );
+
+  const visibleInspections = useMemo(() => {
+    let items = store.inspections.filter((i) => !i.deleted && visibleScaffolds.some((s) => s.id === i.scaffoldId));
+    if (currentUser?.role === "inspector") {
+      items = items.filter((i) => i.inspectorUserId === currentUser.id);
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      items = items.filter((i) => {
+        const scaffold = store.scaffolds.find((s) => s.id === i.scaffoldId);
+        const scaffoldName = scaffold?.name?.toLowerCase() || "";
+        const area = scaffold?.area?.toLowerCase() || "";
+        return scaffoldName.includes(q) || area.includes(q) || i.overallResult.toLowerCase().includes(q);
+      });
+    }
+    return items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }, [store.inspections, visibleScaffolds, currentUser, search, store.scaffolds]);
+
+  const stats = useMemo(() => {
+    const activeScaffolds = visibleScaffolds.filter((s) => s.status !== "dismantled").length;
+    const passed = visibleInspections.filter((i) => i.overallResult === "pass").length;
+    const failed = visibleInspections.filter((i) => i.overallResult === "fail").length;
+    const conditional = visibleInspections.filter((i) => i.overallResult === "conditional").length;
+    return { activeScaffolds, passed, failed, conditional };
+  }, [visibleScaffolds, visibleInspections]);
+
+  const saveInspection = (payload) => {
+    const now = new Date().toISOString();
+    setStore((prev) => {
+      const isEdit = Boolean(payload.id);
+      const inspection = {
+        id: payload.id || uid("insp"),
+        scaffoldId: payload.scaffoldId,
+        inspectionType: payload.inspectionType,
+        inspectorUserId: payload.inspectorUserId,
+        attachedUserId: payload.attachedUserId,
+        overallResult: payload.overallResult,
+        notes: payload.notes,
+        defectsSummary: payload.defectsSummary,
+        correctiveActions: payload.correctiveActions,
+        weather: payload.weather,
+        gpsLat: payload.gpsLat,
+        gpsLng: payload.gpsLng,
+        photos: payload.photos || [],
+        checklist: payload.checklist,
+        createdAt: payload.createdAt || now,
+        updatedAt: now,
+        deleted: false,
+      };
+
+      const inspections = isEdit
+        ? prev.inspections.map((i) => (i.id === payload.id ? inspection : i))
+        : [inspection, ...prev.inspections];
+
+      const scaffolds = prev.scaffolds.map((s) => {
+        if (s.id !== payload.scaffoldId) return s;
+        return {
+          ...s,
+          status: statusFromResult(payload.overallResult),
+          attachedUserId: payload.attachedUserId || s.attachedUserId,
+          lat: payload.gpsLat ?? s.lat,
+          lng: payload.gpsLng ?? s.lng,
+          updatedAt: now,
+        };
+      });
+
+      const preferences = { ...prev.preferences };
+      if (payload.rememberAttachedUserId) {
+        preferences[currentUser.id] = {
+          rememberAttachedUserId: true,
+          lastAttachedUserId: payload.attachedUserId || "",
+        };
+      }
+
+      return { ...prev, inspections, scaffolds, preferences };
+    });
+    setEditingInspection(null);
+    setSelectedInspection(null);
+    setTab("inspections");
+  };
+
+  const deleteInspection = (inspection) => {
+    if (currentUser?.role !== "manager") return;
+    const confirmed = typeof window === "undefined"
+      ? true
+      : window.confirm(`Delete inspection for ${store.scaffolds.find((s) => s.id === inspection.scaffoldId)?.name || "this scaffold"}? This will remove it from the active inspection list.`);
+    if (!confirmed) return;
+
+    setStore((prev) => ({
+      ...prev,
+      inspections: prev.inspections.map((i) =>
+        i.id === inspection.id ? { ...i, deleted: true, updatedAt: new Date().toISOString() } : i,
+      ),
+    }));
+    if (selectedInspection?.id === inspection.id) setSelectedInspection(null);
+    setTab("inspections");
+  };
+
+  const addSite = (site) => setStore((prev) => ({ ...prev, sites: [...prev.sites, site] }));
+  const addScaffold = (scaffold) => setStore((prev) => ({ ...prev, scaffolds: [...prev.scaffolds, scaffold] }));
+  const requestDeleteScaffold = (scaffold) => {
+    if (currentUser?.role !== "manager") return;
+    setPendingScaffoldDelete(scaffold);
+  };
+
+  const deleteScaffold = () => {
+    const scaffold = pendingScaffoldDelete;
+    if (!scaffold || currentUser?.role !== "manager") return;
+
+    const now = new Date().toISOString();
+    setStore((prev) => ({
+      ...prev,
+      scaffolds: prev.scaffolds.filter((item) => item.id !== scaffold.id),
+      inspections: prev.inspections.map((inspection) =>
+        inspection.scaffoldId === scaffold.id ? { ...inspection, deleted: true, updatedAt: now } : inspection,
+      ),
+    }));
+
+    setSelectedInspection((current) => (current?.scaffoldId === scaffold.id ? null : current));
+    setEditingInspection((current) => (current?.scaffoldId === scaffold.id ? null : current));
+    setSelectedScaffoldForNew((current) => (current === scaffold.id ? "" : current));
+    setPendingScaffoldDelete(null);
+  };
+
+  const requestDeleteSite = (site) => {
+    if (currentUser?.role !== "manager") return;
+    setPendingSiteDelete(site);
+  };
+
+  const deleteSite = () => {
+    const site = pendingSiteDelete;
+    if (!site || currentUser?.role !== "manager") return;
+
+    const now = new Date().toISOString();
+
+    setStore((prev) => ({
+      ...prev,
+      sites: prev.sites.filter((s) => s.id !== site.id),
+      scaffolds: prev.scaffolds.filter((scaf) => scaf.siteId !== site.id),
+      inspections: prev.inspections.map((insp) =>
+        prev.scaffolds.some((s) => s.siteId === site.id && s.id === insp.scaffoldId)
+          ? { ...insp, deleted: true, updatedAt: now }
+          : insp
+      ),
+    }));
+
+    setPendingSiteDelete(null);
+  };
+  const moveScaffoldPin = (scaffoldId, lat, lng) => {
+    const now = new Date().toISOString();
+    setStore((prev) => ({
+      ...prev,
+      scaffolds: prev.scaffolds.map((scaffold) =>
+        scaffold.id === scaffoldId ? { ...scaffold, lat, lng, updatedAt: now } : scaffold,
+      ),
+    }));
+  };
+
+  const exportInspectionPdf = (inspection) => {
+    if (typeof window === "undefined") return;
+    const scaffold = store.scaffolds.find((s) => s.id === inspection.scaffoldId);
+    const site = scaffold ? store.sites.find((s) => s.id === scaffold.siteId) : null;
+    const inspector = store.users.find((u) => u.id === inspection.inspectorUserId);
+    const reportWindow = window.open("", "_blank", "width=1024,height=900");
+    if (!reportWindow) {
+      window.alert("Please allow popups to export the PDF report.");
+      return;
+    }
+    const html = buildInspectionReportHtml({ inspection, scaffold, site, inspector });
+    reportWindow.document.open();
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+    reportWindow.focus();
+    setTimeout(() => {
+      reportWindow.print();
+    }, 400);
+  };
+
+  if (!currentUser) {
+    return <LoginScreen users={store.users} onLogin={setCurrentUser} />;
+  }
+
+  const currentVisibleScaffolds = currentUser.role === "inspector"
+    ? visibleScaffolds.filter((s) => s.assignedInspectorId === currentUser.id || s.createdBy === currentUser.id)
+    : visibleScaffolds;
+
+  const selectedInspectionScaffold = selectedInspection
+    ? store.scaffolds.find((s) => s.id === selectedInspection.scaffoldId)
+    : null;
+  const selectedInspectionSite = selectedInspectionScaffold
+    ? store.sites.find((s) => s.id === selectedInspectionScaffold.siteId)
+    : null;
+  const selectedInspectionUser = selectedInspection
+    ? store.users.find((u) => u.id === selectedInspection.inspectorUserId)
+    : null;
+
+  const navItems = currentUser.role === "manager"
+    ? ["dashboard", "inspections", "map", "scaffolds", "sites", "users"]
+    : currentUser.role === "client"
+      ? ["dashboard", "inspections", "map"]
+      : ["dashboard", "inspections", "map", "scaffolds"];
+
+  return (
+    <>
+    <ConfirmDeleteDialog
+      open={!!pendingScaffoldDelete}
+      title="Delete scaffold"
+      description={pendingScaffoldDelete ? `Delete ${pendingScaffoldDelete.name}? Its linked inspections will be removed from the active lists.` : ""}
+      onConfirm={deleteScaffold}
+      onCancel={() => setPendingScaffoldDelete(null)}
+    />
+    <ConfirmDeleteDialog
+      open={!!pendingSiteDelete}
+      title="Delete site"
+      description={pendingSiteDelete ? `Delete ${pendingSiteDelete.name}? All scaffolds and inspections under this site will also be removed.` : ""}
+      onConfirm={deleteSite}
+      onCancel={() => setPendingSiteDelete(null)}
+    />
+    <AppShell
+      user={currentUser}
+      onLogout={() => setCurrentUser(null)}
+      title={currentUser.role === "manager" ? "Manager Portal" : currentUser.role === "client" ? "Client Portal" : "Inspector Portal"}
+      right={
+        <div className="flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-2">
+            {navItems.map((item) => (
+              <Button
+                key={item}
+                variant={tab === item ? "default" : "ghost"}
+                size="sm"
+                onClick={() => {
+                  setTab(item);
+                  setSelectedInspection(null);
+                  setEditingInspection(null);
+                }}
+                className="capitalize"
+              >
+                {item}
+              </Button>
+            ))}
+          </div>
+          <Select
+            value={tab}
+            onValueChange={(item) => {
+              setTab(item);
+              setSelectedInspection(null);
+              setEditingInspection(null);
+            }}
+          >
+            <SelectTrigger className="w-[140px] md:hidden">
+              <SelectValue placeholder="Menu" />
+            </SelectTrigger>
+            <SelectContent>
+              {navItems.map((item) => (
+                <SelectItem key={item} value={item} className="capitalize">
+                  {item}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      }
+    >
+      {editingInspection ? (
+        <InspectionForm
+          store={store}
+          currentUser={currentUser}
+          scaffold={store.scaffolds.find((s) => s.id === editingInspection.scaffoldId)}
+          initialInspection={editingInspection?.id ? editingInspection : null}
+          onSave={saveInspection}
+          onCancel={() => setEditingInspection(null)}
+        />
+      ) : selectedInspection ? (
+        <InspectionDetail
+          inspection={selectedInspection}
+          scaffold={selectedInspectionScaffold}
+          site={selectedInspectionSite}
+          inspector={selectedInspectionUser}
+          canEdit={currentUser.role === "manager"}
+          onEdit={() => setEditingInspection(selectedInspection)}
+          canDelete={currentUser.role === "manager"}
+          onDelete={deleteInspection}
+          onExportPdf={exportInspectionPdf}
+        />
+      ) : tab === "dashboard" ? (
+        <div className="space-y-6">
+          <div className="grid md:grid-cols-4 gap-4">
+            <MetricCard title="Active scaffolds" value={stats.activeScaffolds} icon={ShieldCheck} />
+            <MetricCard title="Passed inspections" value={stats.passed} icon={ClipboardList} tone="success" />
+            <MetricCard title="Conditional" value={stats.conditional} icon={Clock3} />
+            <MetricCard title="Failed inspections" value={stats.failed} icon={FileText} tone="danger" />
+          </div>
+
+          <div className="grid xl:grid-cols-3 gap-4">
+            {(currentUser.role === "inspector" || currentUser.role === "manager") ? (
+              <Card className="rounded-2xl xl:col-span-2">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle>Quick Actions</CardTitle>
+                  <div className="flex gap-2 flex-wrap">
+                    {currentUser.role === "manager" ? <SiteDialog onSave={addSite} /> : null}
+                    <ScaffoldDialog sites={store.sites.filter((s) => visibleSiteIds.includes(s.id))} onSave={addScaffold} currentUser={currentUser} />
+                  </div>
+                </CardHeader>
+                <CardContent className="grid md:grid-cols-3 gap-4">
+                  <Card className="rounded-2xl border-dashed">
+                    <CardContent className="p-4 space-y-3">
+                      <div className="font-medium">Create new inspection</div>
+                      <Select value={selectedScaffoldForNew} onValueChange={setSelectedScaffoldForNew}>
+                        <SelectTrigger><SelectValue placeholder="Select scaffold" /></SelectTrigger>
+                        <SelectContent>
+                          {currentVisibleScaffolds.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>{s.name} • {typeLabel(s.scaffoldType)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        className="w-full"
+                        disabled={!selectedScaffoldForNew}
+                        onClick={() => {
+                          const scaffold = store.scaffolds.find((s) => s.id === selectedScaffoldForNew);
+                          if (!scaffold) return;
+                          setEditingInspection({ scaffoldId: scaffold.id, inspectionType: scaffold.scaffoldType });
+                        }}
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Start inspection
+                      </Button>
+                    </CardContent>
+                  </Card>
+                  <Card className="rounded-2xl">
+                    <CardContent className="p-4">
+                      <div className="font-medium mb-2">My access</div>
+                      <div className="text-sm text-slate-500">
+                        {currentUser.role === "manager"
+                          ? "Full management access across inspections, users, sites, and location overview."
+                          : "Create inspections, upload photos, capture GPS, and review visible records."}
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className="rounded-2xl">
+                    <CardContent className="p-4">
+                      <div className="font-medium mb-2">Latest activity</div>
+                      <div className="text-sm text-slate-500">
+                        {visibleInspections[0]
+                          ? `${store.scaffolds.find((s) => s.id === visibleInspections[0].scaffoldId)?.name || "Scaffold"} inspected ${formatDate(visibleInspections[0].createdAt)}`
+                          : "No recent activity"}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </CardContent>
+              </Card>
+            ) : null}
+            <SelfTestPanel />
+          </div>
+
+          <MapView scaffolds={visibleScaffolds} sites={store.sites} inspections={visibleInspections} users={store.users} currentUser={currentUser} onMovePin={moveScaffoldPin} />
+        </div>
+      ) : tab === "inspections" ? (
+        <div className="space-y-4">
+          <div className="flex gap-3 flex-wrap items-center">
+            <div className="relative max-w-md w-full">
+              <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+              <Input className="pl-9" placeholder="Search scaffold, area or result" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+          </div>
+          <InspectionList
+            inspections={visibleInspections}
+            scaffolds={store.scaffolds}
+            users={store.users}
+            onOpen={setSelectedInspection}
+            onEdit={currentUser.role === "manager" ? setEditingInspection : null}
+            canDelete={currentUser.role === "manager"}
+            onDelete={deleteInspection}
+          />
+        </div>
+      ) : tab === "map" ? (
+        <MapView scaffolds={visibleScaffolds} sites={store.sites} inspections={visibleInspections} users={store.users} currentUser={currentUser} onMovePin={moveScaffoldPin} />
+      ) : tab === "scaffolds" ? (
+        <div className="space-y-4">
+          <div className="flex gap-2 flex-wrap">
+            {(currentUser.role === "manager" || currentUser.role === "inspector") ? (
+              <ScaffoldDialog sites={store.sites.filter((s) => visibleSiteIds.includes(s.id))} onSave={addScaffold} currentUser={currentUser} />
+            ) : null}
+          </div>
+          <div className="grid lg:grid-cols-2 gap-4">
+            {currentVisibleScaffolds.map((s) => {
+              const site = store.sites.find((x) => x.id === s.siteId);
+              const latest = visibleInspections.find((i) => i.scaffoldId === s.id);
+              return (
+                <Card key={s.id} className="rounded-2xl">
+                  <CardContent className="p-4 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-semibold">{s.name}</div>
+                        <div className="text-sm text-slate-500">{site?.name || "Unknown site"} • {s.area || "No area"}</div>
+                      </div>
+                      <Badge className="capitalize">{String(s.status || "-").replaceAll("_", " ")}</Badge>
+                    </div>
+                    <div className="text-sm">{typeLabel(s.scaffoldType)}</div>
+                    <div className="text-sm text-slate-500">{s.description || "No description"}</div>
+                    <Separator />
+                    <div className="text-sm">Attached user ID: {s.attachedUserId || "-"}</div>
+                    <div className="text-sm">Latest inspection: {latest ? formatDate(latest.createdAt) : "No inspection yet"}</div>
+                    <div className="flex gap-2 pt-2 flex-wrap">
+                      {(currentUser.role === "manager" || currentUser.role === "inspector") ? (
+                        <Button variant="outline" onClick={() => setEditingInspection({ scaffoldId: s.id, inspectionType: s.scaffoldType })}>
+                          New inspection
+                        </Button>
+                      ) : null}
+                      {currentUser.role === "manager" ? (
+                        <Button variant="destructive" onClick={() => requestDeleteScaffold(s)}>
+                          <Trash2 className="w-4 h-4 mr-2" />Delete scaffold
+                        </Button>
+                      ) : null}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      ) : tab === "sites" ? (
+        <div className="space-y-4">
+          <div className="flex gap-2"><SiteDialog onSave={addSite} /></div>
+          <div className="grid lg:grid-cols-2 gap-4">
+            {store.sites.map((site) => (
+              <Card key={site.id} className="rounded-2xl">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="font-semibold">{site.name}</div>
+                    {currentUser.role === "manager" ? (
+                      <Button variant="destructive" size="sm" onClick={() => requestDeleteSite(site)}>
+                        <Trash2 className="w-4 h-4 mr-1" />Delete
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="text-sm text-slate-500">{site.clientName} • {site.area}</div>
+                  <div className="text-sm">{site.address}</div>
+                  <div className="text-xs text-slate-500">{site.lat}, {site.lng}</div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      ) : tab === "users" ? (
+        <ManagerUserPanel users={store.users} setStore={setStore} />
+      ) : null}
+    </AppShell>
+    </>
+  );
+}
