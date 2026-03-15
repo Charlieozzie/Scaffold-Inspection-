@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Scaffold Inspection App</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+body{font-family:Arial;margin:0;background:#f4f6f8}
+header{background:#0f172a;color:white;padding:15px;text-align:center}
+.container{padding:20px;max-width:900px;margin:auto}
+.card{background:white;padding:15px;margin-bottom:15px;border-radius:8px}
+button{padding:10px 15px;border:none;background:#2563eb;color:white;border-radius:6px}
+input,textarea{width:100%;padding:8px;margin-top:6px;margin-bottom:10px}
+</style>
+
+</head>
+
+<body>
+
+<header>
+<h2>Scaffold Inspection (Demo)</h2>
+</header>
+
+<div class="container">
+
+<div class="card">
+<h3>New Inspection</h3>
+
+<label>Site Name</label> <input id="site">
+
+<label>Scaffold</label> <input id="scaffold">
+
+<label>Notes</label>
+
+<textarea id="notes"></textarea>
+
+<button onclick="save()">Save Inspection</button>
+
+</div>
+
+<div class="card">
+<h3>Saved Inspections</h3>
+<div id="list"></div>
+</div>
+
+</div>
+
+<script>
+function save(){
+let data={
+site:site.value,
+scaffold:scaffold.value,
+notes:notes.value,
+date:new Date().toLocaleString()
+};
+
+let list=JSON.parse(localStorage.getItem("inspections")||"[]");
+list.unshift(data);
+localStorage.setItem("inspections",JSON.stringify(list));
+show();
+}
+
+function show(){
+let list=JSON.parse(localStorage.getItem("inspections")||"[]");
+let html="";
+list.forEach(x=>{
+html+=`<p><b>${x.site}</b> - ${x.scaffold}<br>${x.notes}<br><small>${x.date}</small></p><hr>`
+});
+document.getElementById("list").innerHTML=html;
+}
+
+show();
+</script>
+
+</body>
+</html>
